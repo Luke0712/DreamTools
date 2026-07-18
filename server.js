@@ -129,35 +129,28 @@ async function parseMultipartRequest(req) {
   const boundaryMatch = contentType.match(/boundary=([^;]+)/);
   if (!boundaryMatch) return null;
 
-  const boundary = Buffer.from(`--${boundaryMatch[1]}`);
+  const boundary = boundaryMatch[1].replace(/^"|"$/g, "");
   const body = await readRequestBody(req);
   const fields = {};
   const files = {};
-  let cursor = 0;
 
-  while (cursor < body.length) {
-    const boundaryStart = body.indexOf(boundary, cursor);
-    if (boundaryStart === -1) break;
+  for (const rawPart of body.toString("binary").split(`--${boundary}`)) {
+    if (!rawPart || rawPart === "--\r\n" || rawPart === "--") continue;
 
-    let partStart = boundaryStart + boundary.length;
-    if (body.slice(partStart, partStart + 2).toString() === "--") break;
-    if (body.slice(partStart, partStart + 2).toString() === "\r\n") partStart += 2;
+    const trimmedPart = rawPart.startsWith("\r\n") ? rawPart.slice(2) : rawPart;
+    const headerEnd = trimmedPart.indexOf("\r\n\r\n");
+    if (headerEnd === -1) continue;
 
-    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), partStart);
-    if (headerEnd === -1) break;
-
-    const headersText = body.slice(partStart, headerEnd).toString("utf8");
-    const contentStart = headerEnd + 4;
-    let nextBoundary = body.indexOf(boundary, contentStart);
-    if (nextBoundary === -1) nextBoundary = body.length;
-
-    let contentEnd = nextBoundary;
-    if (body.slice(contentEnd - 2, contentEnd).toString() === "\r\n") contentEnd -= 2;
+    const headersText = trimmedPart.slice(0, headerEnd);
+    let content = trimmedPart.slice(headerEnd + 4);
+    if (content.endsWith("\r\n")) content = content.slice(0, -2);
+    if (content.endsWith("--")) content = content.slice(0, -2);
 
     const headers = Object.fromEntries(
-      headersText.split(/\r?\n/).map((line) => {
+      headersText.split(/\r?\n/).flatMap((line) => {
         const index = line.indexOf(":");
-        return [line.slice(0, index).toLowerCase(), line.slice(index + 1).trim()];
+        if (index === -1) return [];
+        return [[line.slice(0, index).toLowerCase(), line.slice(index + 1).trim()]];
       })
     );
     const disposition = parseContentDisposition(headers["content-disposition"]);
@@ -166,13 +159,11 @@ async function parseMultipartRequest(req) {
       const file = {
         filename: disposition.filename,
         contentType: headers["content-type"] || "application/octet-stream",
-        buffer: body.slice(contentStart, contentEnd)
+        buffer: Buffer.from(content, "binary")
       };
       if (disposition.filename) files[name] = file;
       else fields[name] = file.buffer.toString("utf8");
     }
-
-    cursor = nextBoundary + boundary.length;
   }
 
   return { fields, files };
