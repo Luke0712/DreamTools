@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DreamTools 生图</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="workspace" aria-label="生图工作台">
+        <div class="panel controls">
+          <div>
+            <p class="eyebrow">DreamTools</p>
+            <h1>AI 生图工作台</h1>
+          </div>
+
+          <label class="field">
+            <span>提示词</span>
+            <textarea id="prompt" rows="9">一张高质量写实人像照片：一位成年年轻女性，温和自信的神情，自然妆容，肩部以上半身构图，现代简洁背景，柔和自然光，肤色真实，细节清晰，摄影棚级质感。不要文字、不要水印、不要夸张姿势、不要暴露内容。</textarea>
+          </label>
+
+          <label class="field">
+            <span>尺寸</span>
+            <select id="size">
+              <option value="1024x1024">1024 x 1024</option>
+              <option value="1536x1024">1536 x 1024</option>
+              <option value="1024x1536">1024 x 1536</option>
+            </select>
+          </label>
+
+          <button id="generateButton" type="button">
+            <span class="spark" aria-hidden="true">✦</span>
+            生成图片
+          </button>
+
+          <p id="status" class="status" role="status">输入提示词后点击生成。</p>
+        </div>
+
+        <div class="preview" aria-label="生成结果">
+          <div id="emptyState" class="empty-state">
+            <div class="empty-mark" aria-hidden="true"></div>
+            <p>生成结果会显示在这里</p>
+          </div>
+          <img id="resultImage" alt="生成的图片" hidden />
+          <a id="downloadLink" class="download" href="#" download="dreamtools-image.png" hidden>下载图片</a>
+        </div>
+      </section>
+    </main>
+
+    <script src="/script.js"></script>
+  </body>
+</html>
