@@ -3,46 +3,119 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DreamTools 生图</title>
+    <title>DreamTools 图像工具</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="app">
-      <section class="workspace" aria-label="生图工作台">
+      <section class="workspace" aria-label="图像工作台">
         <div class="panel controls">
           <div>
             <p class="eyebrow">DreamTools</p>
-            <h1>AI 生图工作台</h1>
+            <h1>AI 图像工作台</h1>
+          </div>
+
+          <div class="mode-tabs" role="tablist" aria-label="工作模式">
+            <button class="mode-tab active" type="button" data-mode="generate">生成</button>
+            <button class="mode-tab" type="button" data-mode="edit">编辑</button>
+          </div>
+
+          <div id="editFields" class="edit-fields" hidden>
+            <label class="file-field">
+              <span>原图</span>
+              <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <label class="file-field">
+              <span>蒙版</span>
+              <input id="maskInput" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
           </div>
 
           <label class="field">
             <span>提示词</span>
-            <textarea id="prompt" rows="9">一张高质量写实人像照片：一位成年年轻女性，温和自信的神情，自然妆容，肩部以上半身构图，现代简洁背景，柔和自然光，肤色真实，细节清晰，摄影棚级质感。不要文字、不要水印、不要夸张姿势、不要暴露内容。</textarea>
+            <textarea id="prompt" rows="8">一张高质量写实人像照片：一位成年年轻女性，温和自信的神情，自然妆容，肩部以上半身构图，现代简洁背景，柔和自然光，肤色真实，细节清晰，摄影棚级质感。不要文字、不要水印、不要夸张姿势、不要暴露内容。</textarea>
           </label>
 
-          <label class="field">
-            <span>尺寸</span>
-            <select id="size">
-              <option value="1024x1024">1024 x 1024</option>
-              <option value="1536x1024">1536 x 1024</option>
-              <option value="1024x1536">1024 x 1536</option>
-            </select>
-          </label>
+          <details class="advanced" open>
+            <summary>参数</summary>
+            <div class="param-grid">
+              <label class="field">
+                <span>模型</span>
+                <input id="model" value="gpt-image-2" />
+              </label>
+              <label class="field">
+                <span>尺寸</span>
+                <select id="size">
+                  <option value="1024x1024">1024 x 1024</option>
+                  <option value="1536x1024">1536 x 1024</option>
+                  <option value="1024x1536">1024 x 1536</option>
+                  <option value="auto">auto</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>数量</span>
+                <input id="n" type="number" min="1" max="10" value="1" />
+              </label>
+              <label class="field">
+                <span>质量</span>
+                <select id="quality">
+                  <option value="">默认</option>
+                  <option value="auto">auto</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>背景</span>
+                <select id="background">
+                  <option value="">默认</option>
+                  <option value="auto">auto</option>
+                  <option value="opaque">opaque</option>
+                  <option value="transparent">transparent</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>输出格式</span>
+                <select id="outputFormat">
+                  <option value="">默认</option>
+                  <option value="png">png</option>
+                  <option value="jpeg">jpeg</option>
+                  <option value="webp">webp</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>压缩</span>
+                <input id="outputCompression" type="number" min="0" max="100" placeholder="0-100" />
+              </label>
+              <label class="field">
+                <span>审核</span>
+                <select id="moderation">
+                  <option value="">默认</option>
+                  <option value="auto">auto</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <label class="field edit-only" hidden>
+                <span>参考强度</span>
+                <select id="inputFidelity">
+                  <option value="">默认</option>
+                  <option value="low">low</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+            </div>
+          </details>
 
-          <button id="generateButton" type="button">
-            <span class="spark" aria-hidden="true">✦</span>
-            生成图片
-          </button>
-
-          <p id="status" class="status" role="status">输入提示词后点击生成。</p>
+          <button id="runButton" type="button">生成图片</button>
+          <p id="status" class="status" role="status">选择模式，输入提示词后开始。</p>
         </div>
 
-        <div class="preview" aria-label="生成结果">
+        <div class="preview" aria-label="图像结果">
           <div id="emptyState" class="empty-state">
-            <div class="empty-mark" aria-hidden="true"></div>
-            <p>生成结果会显示在这里</p>
+            <p>等待生成</p>
           </div>
-          <img id="resultImage" alt="生成的图片" hidden />
+          <img id="resultImage" alt="生成或编辑后的图片" hidden />
           <a id="downloadLink" class="download" href="#" download="dreamtools-image.png" hidden>下载图片</a>
         </div>
       </section>
