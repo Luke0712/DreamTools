@@ -139,7 +139,7 @@ body {
 }
 
 .upload-grid .ant-upload-list-item-thumbnail img {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .upload-title {
