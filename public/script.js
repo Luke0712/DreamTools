@@ -4,7 +4,7 @@ function boot() {
     return;
   }
 
-const { useMemo, useState } = React;
+  const { useMemo, useState } = React;
 const {
   App,
   Button,
@@ -150,17 +150,7 @@ function ImageWorkbench() {
 
     try {
       if (mode === "edit") {
-        const response = await requestEdit(values);
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "处理失败。");
-        }
-
-        const nextImages = data.images?.length ? data.images : [data.image];
-        setResult(data);
-        setImages(nextImages);
-        setSelectedIndex(0);
-        setStatus(`编辑完成，共 ${nextImages.length} 张。模型：${data.model}`);
+        await requestEditStream(values);
         message.success("编辑完成");
         return;
       }
@@ -177,18 +167,34 @@ function ImageWorkbench() {
   }
 
   async function requestGenerateStream(values) {
-    const expectedCount = Number(values.n || 1);
-    let receivedCount = 0;
-    let modelName = values.model || "gpt-image-2";
-    const response = await fetch("/api/generate-stream", {
-      method: "POST",
+    await readImageStream({
+      url: "/api/generate-stream",
+      body: JSON.stringify(compactParams(values, false)),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(compactParams(values, false))
+      expectedCount: Number(values.n || 1),
+      modelName: values.model || "gpt-image-2",
+      actionText: "生成",
+      emptyError: "生成失败。"
+    });
+  }
+
+  async function readImageStream({ url, body, headers, expectedCount, modelName, actionText, emptyError }) {
+    const totalCount = Number(expectedCount || 1);
+    let receivedCount = 0;
+    let currentModelName = modelName;
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body
     });
 
     if (!response.ok || !response.body) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || "生成失败。");
+      if (data?.code === "MISSING_IMAGE_API_KEY") {
+        setSettingsOpen(true);
+        setStatus("请先配置 API Key。");
+      }
+      throw new Error(data.error || emptyError);
     }
 
     const reader = response.body.getReader();
@@ -208,31 +214,31 @@ function ImageWorkbench() {
         const event = JSON.parse(line);
 
         if (event.type === "start") {
-          modelName = event.model || modelName;
-          setStatus(`开始生成，共 ${event.total} 张...`);
+          currentModelName = event.model || currentModelName;
+          setStatus(`开始${actionText}，共 ${event.total} 张...`);
         }
 
         if (event.type === "image") {
           receivedCount += 1;
-          setResult({ model: event.model || modelName });
+          setResult({ model: event.model || currentModelName });
           setImages((previous) => {
             const next = [...previous, event.image];
             setSelectedIndex(next.length - 1);
             return next;
           });
-          setStatus(`已生成 ${receivedCount} / ${expectedCount} 张。模型：${event.model || modelName}`);
+          setStatus(`已${actionText} ${receivedCount} / ${totalCount} 张。模型：${event.model || currentModelName}`);
         }
 
         if (event.type === "error") {
-          throw new Error(event.error || "生成失败。");
+          throw new Error(event.error || emptyError);
         }
       }
     }
 
-    setStatus(`生成完成，共 ${receivedCount} 张。模型：${modelName}`);
+    setStatus(`${actionText}完成，共 ${receivedCount} 张。模型：${currentModelName}`);
   }
 
-  async function requestEdit(values) {
+  async function requestEditStream(values) {
     const image = fileFromUpload(values.image);
     if (!image) {
       throw new Error("请先上传要编辑的原图。");
@@ -249,9 +255,14 @@ function ImageWorkbench() {
       formData.append("mask", mask);
     }
 
-    return fetch("/api/edit", {
-      method: "POST",
-      body: formData
+    await readImageStream({
+      url: "/api/edit-stream",
+      body: formData,
+      headers: undefined,
+      expectedCount: Number(values.n || 1),
+      modelName: values.model || "gpt-image-2",
+      actionText: "编辑",
+      emptyError: "编辑失败。"
     });
   }
 
@@ -305,9 +316,9 @@ function ImageWorkbench() {
         React.createElement("main", { className: "app-shell" },
           React.createElement("section", { className: "workbench" },
             React.createElement(Card, { className: "control-card", bordered: false },
-              React.createElement(Space, { direction: "vertical", size: 18, className: "full-width" },
-                React.createElement(Segmented, {
-                  block: true,
+                React.createElement(Space, { direction: "vertical", size: 18, className: "full-width" },
+                  React.createElement(Segmented, {
+                    block: true,
                   value: mode,
                   onChange: (value) => {
                     setMode(value);

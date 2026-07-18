@@ -1,10 +1,15 @@
 import http from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const configPath = process.env.DREAMTOOLS_CONFIG_PATH || "";
 await loadDotEnv(join(root, ".env"));
+if (process.resourcesPath) {
+  await loadDotEnv(join(process.resourcesPath, ".env"));
+}
+await loadPersistedConfig();
 
 const publicDir = join(root, "public");
 const vendorFiles = {
@@ -15,8 +20,6 @@ const vendorFiles = {
   "/vendor/react.min.js": join(root, "node_modules/react/umd/react.production.min.js")
 };
 const defaultPort = Number(process.env.PORT || 5177);
-const apiBase = process.env.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1";
-const model = process.env.IMAGE_MODEL || "gpt-image-2";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -49,6 +52,45 @@ async function loadDotEnv(filePath) {
   }
 }
 
+function getRuntimeConfig() {
+  return {
+    apiKey: process.env.IMAGE_API_KEY || "",
+    apiBase: process.env.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1",
+    model: process.env.IMAGE_MODEL || "gpt-image-2"
+  };
+}
+
+async function loadPersistedConfig() {
+  if (!configPath) return;
+
+  try {
+    const content = await readFile(configPath, "utf8");
+    const data = JSON.parse(content);
+    if (data.IMAGE_API_KEY && !process.env.IMAGE_API_KEY) process.env.IMAGE_API_KEY = String(data.IMAGE_API_KEY);
+    if (data.IMAGE_API_BASE && !process.env.IMAGE_API_BASE) process.env.IMAGE_API_BASE = String(data.IMAGE_API_BASE);
+    if (data.IMAGE_MODEL && !process.env.IMAGE_MODEL) process.env.IMAGE_MODEL = String(data.IMAGE_MODEL);
+  } catch {
+    // ignore missing or malformed config
+  }
+}
+
+async function savePersistedConfig(body) {
+  if (!configPath) return;
+
+  const next = {
+    IMAGE_API_KEY: String(body.IMAGE_API_KEY || ""),
+    IMAGE_API_BASE: String(body.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1"),
+    IMAGE_MODEL: String(body.IMAGE_MODEL || "gpt-image-2")
+  };
+
+  process.env.IMAGE_API_KEY = next.IMAGE_API_KEY;
+  process.env.IMAGE_API_BASE = next.IMAGE_API_BASE;
+  process.env.IMAGE_MODEL = next.IMAGE_MODEL;
+
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
@@ -67,8 +109,8 @@ async function readRequestBody(req) {
 }
 
 function assertApiKey(res) {
-  if (!process.env.IMAGE_API_KEY) {
-    sendJson(res, 500, { error: "Server is missing IMAGE_API_KEY." });
+  if (!getRuntimeConfig().apiKey) {
+    sendJson(res, 400, { error: "请先在应用设置里填写 API Key。", code: "MISSING_IMAGE_API_KEY" });
     return false;
   }
   return true;
@@ -100,7 +142,7 @@ function buildImagePayload(body) {
     payload[key] = String(value);
   }
 
-  payload.model = String(body.model || model);
+  payload.model = String(body.model || getRuntimeConfig().model);
   return payload;
 }
 
@@ -115,7 +157,7 @@ function normalizeImageResponse(data) {
     image: images[0],
     images,
     created: data.created,
-    model: data.model || model
+    model: data.model || getRuntimeConfig().model
   };
 }
 
@@ -212,10 +254,11 @@ async function handleGenerate(req, res) {
   let created;
 
   for (let index = 0; index < count; index += 1) {
-    const response = await fetch(`${apiBase}/images/generations`, {
+    const runtime = getRuntimeConfig();
+    const response = await fetch(`${runtime.apiBase}/images/generations`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.IMAGE_API_KEY}`,
+        Authorization: `Bearer ${runtime.apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
@@ -251,10 +294,11 @@ async function handleGenerate(req, res) {
 }
 
 async function generateOneImage(payload) {
-  const response = await fetch(`${apiBase}/images/generations`, {
+  const runtime = getRuntimeConfig();
+  const response = await fetch(`${runtime.apiBase}/images/generations`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.IMAGE_API_KEY}`,
+      Authorization: `Bearer ${runtime.apiKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
@@ -365,10 +409,11 @@ async function handleEdit(req, res) {
       form.append("mask", new Blob([mask.buffer], { type: mask.contentType }), mask.filename || "mask.png");
     }
 
-    const response = await fetch(`${apiBase}/images/edits`, {
+    const runtime = getRuntimeConfig();
+    const response = await fetch(`${runtime.apiBase}/images/edits`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.IMAGE_API_KEY}`
+        Authorization: `Bearer ${runtime.apiKey}`
       },
       body: form
     });
@@ -402,6 +447,99 @@ async function handleEdit(req, res) {
   });
 }
 
+async function editOneImage(payload, sourceImage, mask) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(payload)) {
+    form.append(key, String(value));
+  }
+  form.append("image", new Blob([sourceImage.buffer], { type: sourceImage.contentType }), sourceImage.filename || "image.png");
+
+  if (mask?.buffer?.length) {
+    form.append("mask", new Blob([mask.buffer], { type: mask.contentType }), mask.filename || "mask.png");
+  }
+
+  const runtime = getRuntimeConfig();
+  const response = await fetch(`${runtime.apiBase}/images/edits`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${runtime.apiKey}`
+    },
+    body: form
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Image edit failed.");
+  }
+
+  return normalizeImageResponse(data);
+}
+
+async function handleEditStream(req, res) {
+  if (!assertApiKey(res)) return;
+
+  const parsed = await parseMultipartRequest(req);
+  if (!parsed) {
+    sendJson(res, 400, { error: "Invalid multipart request." });
+    return;
+  }
+
+  const payload = buildImagePayload(parsed.fields);
+  const prompt = String(payload.prompt || "").trim();
+  const sourceImage = parsed.files.image;
+  const mask = parsed.files.mask;
+  const count = readCount(parsed.fields);
+
+  if (prompt.length < 2) {
+    sendJson(res, 400, { error: "Please enter an edit prompt." });
+    return;
+  }
+
+  if (!sourceImage?.buffer?.length) {
+    sendJson(res, 400, { error: "Please upload an image to edit." });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+
+  writeNdjson(res, { type: "start", total: count, model: payload.model });
+
+  for (let index = 0; index < count; index += 1) {
+    try {
+      const normalized = await editOneImage(payload, sourceImage, mask);
+      if (!normalized) {
+        writeNdjson(res, { type: "error", index, error: "The image API returned an empty edit result." });
+        continue;
+      }
+
+      for (const image of normalized.images) {
+        writeNdjson(res, {
+          type: "image",
+          index,
+          image,
+          created: normalized.created,
+          model: payload.model
+        });
+      }
+    } catch (error) {
+      writeNdjson(res, {
+        type: "error",
+        index,
+        error: error instanceof Error ? error.message : "Image edit failed."
+      });
+      break;
+    }
+  }
+
+  writeNdjson(res, { type: "done", model: payload.model });
+  res.end();
+}
+
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -426,24 +564,55 @@ async function serveStatic(req, res) {
   }
 }
 
+function readSettings() {
+  const runtime = getRuntimeConfig();
+  return {
+    hasApiKey: Boolean(runtime.apiKey),
+    apiBase: runtime.apiBase,
+    model: runtime.model
+  };
+}
+
 export function startServer(port = defaultPort) {
   return new Promise((resolve, reject) => {
     let server;
 
     const handleRequest = async (req, res) => {
       try {
-    if (req.method === "POST" && req.url === "/api/generate") {
-      await handleGenerate(req, res);
-      return;
-    }
+        if (req.method === "GET" && req.url === "/api/settings") {
+          sendJson(res, 200, readSettings());
+          return;
+        }
 
-    if (req.method === "POST" && req.url === "/api/generate-stream") {
-      await handleGenerateStream(req, res);
-      return;
-    }
+        if (req.method === "POST" && req.url === "/api/settings") {
+          const body = await parseJsonRequest(req);
+          if (!body) {
+            sendJson(res, 400, { error: "Invalid JSON request." });
+            return;
+          }
+
+          await savePersistedConfig(body);
+          sendJson(res, 200, readSettings());
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/api/generate") {
+          await handleGenerate(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/api/generate-stream") {
+          await handleGenerateStream(req, res);
+          return;
+        }
 
         if (req.method === "POST" && req.url === "/api/edit") {
           await handleEdit(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/api/edit-stream") {
+          await handleEditStream(req, res);
           return;
         }
 

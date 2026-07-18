@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from "electron";
+import { join } from "node:path";
 import { startServer } from "../server.js";
 
 let mainWindow;
@@ -21,6 +22,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  process.env.DREAMTOOLS_CONFIG_PATH = join(app.getPath("userData"), "settings.json");
   serverReady = startServer(process.env.PORT ? Number(process.env.PORT) : 5177);
   serverHandle = await serverReady;
   await createWindow();

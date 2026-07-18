@@ -32,6 +32,9 @@
       "server.js",
       "package.json"
     ],
+    "extraResources": [
+      ".env"
+    ],
     "mac": {
       "category": "public.app-category.graphics-design",
       "icon": "build/icon.icns",
