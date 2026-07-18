@@ -7,7 +7,14 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 await loadDotEnv(join(root, ".env"));
 
 const publicDir = join(root, "public");
-const port = Number(process.env.PORT || 5177);
+const vendorFiles = {
+  "/vendor/antd-reset.css": join(root, "node_modules/antd/dist/reset.css"),
+  "/vendor/antd.min.js": join(root, "node_modules/antd/dist/antd.min.js"),
+  "/vendor/dayjs.min.js": join(root, "node_modules/dayjs/dayjs.min.js"),
+  "/vendor/react-dom.min.js": join(root, "node_modules/react-dom/umd/react-dom.production.min.js"),
+  "/vendor/react.min.js": join(root, "node_modules/react/umd/react.production.min.js")
+};
+const defaultPort = Number(process.env.PORT || 5177);
 const apiBase = process.env.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1";
 const model = process.env.IMAGE_MODEL || "gpt-image-2";
 
@@ -47,6 +54,10 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function writeNdjson(res, body) {
+  res.write(`${JSON.stringify(body)}\n`);
+}
+
 async function readRequestBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -68,7 +79,6 @@ function buildImagePayload(body) {
   const allowed = [
     "prompt",
     "size",
-    "n",
     "quality",
     "background",
     "output_format",
@@ -95,13 +105,24 @@ function buildImagePayload(body) {
 }
 
 function normalizeImageResponse(data) {
-  const image = data?.data?.[0];
-  if (!image?.b64_json && !image?.url) return null;
+  const images = (data?.data || [])
+    .filter((image) => image?.b64_json || image?.url)
+    .map((image) => (image.b64_json ? `data:image/png;base64,${image.b64_json}` : image.url));
+
+  if (!images.length) return null;
+
   return {
-    image: image.b64_json ? `data:image/png;base64,${image.b64_json}` : image.url,
+    image: images[0],
+    images,
     created: data.created,
     model: data.model || model
   };
+}
+
+function readCount(body) {
+  const count = Number(body?.n || 1);
+  if (!Number.isFinite(count)) return 1;
+  return Math.min(Math.max(Math.floor(count), 1), 10);
 }
 
 async function parseJsonRequest(req) {
@@ -180,12 +201,56 @@ async function handleGenerate(req, res) {
 
   const payload = buildImagePayload(body);
   const prompt = String(payload.prompt || "").trim();
+  const count = readCount(body);
 
   if (prompt.length < 2) {
     sendJson(res, 400, { error: "Please enter a prompt." });
     return;
   }
 
+  const results = [];
+  let created;
+
+  for (let index = 0; index < count; index += 1) {
+    const response = await fetch(`${apiBase}/images/generations`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.IMAGE_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      sendJson(res, response.status, {
+        error: data?.error?.message || data?.message || "Image generation failed."
+      });
+      return;
+    }
+
+    const normalized = normalizeImageResponse(data);
+    if (normalized) {
+      results.push(...normalized.images);
+      created = normalized.created || created;
+    }
+  }
+
+  if (!results.length) {
+    sendJson(res, 502, { error: "The image API returned an empty result." });
+    return;
+  }
+
+  sendJson(res, 200, {
+    image: results[0],
+    images: results,
+    created,
+    model: payload.model
+  });
+}
+
+async function generateOneImage(payload) {
   const response = await fetch(`${apiBase}/images/generations`, {
     method: "POST",
     headers: {
@@ -198,19 +263,67 @@ async function handleGenerate(req, res) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    sendJson(res, response.status, {
-      error: data?.error?.message || data?.message || "Image generation failed."
-    });
+    throw new Error(data?.error?.message || data?.message || "Image generation failed.");
+  }
+
+  return normalizeImageResponse(data);
+}
+
+async function handleGenerateStream(req, res) {
+  if (!assertApiKey(res)) return;
+
+  const body = await parseJsonRequest(req);
+  if (!body) {
+    sendJson(res, 400, { error: "Invalid JSON request." });
     return;
   }
 
-  const normalized = normalizeImageResponse(data);
-  if (!normalized) {
-    sendJson(res, 502, { error: "The image API returned an empty result." });
+  const payload = buildImagePayload(body);
+  const prompt = String(payload.prompt || "").trim();
+  const count = readCount(body);
+
+  if (prompt.length < 2) {
+    sendJson(res, 400, { error: "Please enter a prompt." });
     return;
   }
 
-  sendJson(res, 200, normalized);
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+
+  writeNdjson(res, { type: "start", total: count, model: payload.model });
+
+  for (let index = 0; index < count; index += 1) {
+    try {
+      const normalized = await generateOneImage(payload);
+      if (!normalized) {
+        writeNdjson(res, { type: "error", index, error: "The image API returned an empty result." });
+        continue;
+      }
+
+      for (const image of normalized.images) {
+        writeNdjson(res, {
+          type: "image",
+          index,
+          image,
+          created: normalized.created,
+          model: payload.model
+        });
+      }
+    } catch (error) {
+      writeNdjson(res, {
+        type: "error",
+        index,
+        error: error instanceof Error ? error.message : "Image generation failed."
+      });
+      break;
+    }
+  }
+
+  writeNdjson(res, { type: "done", model: payload.model });
+  res.end();
 }
 
 async function handleEdit(req, res) {
@@ -225,6 +338,7 @@ async function handleEdit(req, res) {
   const payload = buildImagePayload(parsed.fields);
   const prompt = String(payload.prompt || "").trim();
   const sourceImage = parsed.files.image;
+  const count = readCount(parsed.fields);
 
   if (prompt.length < 2) {
     sendJson(res, 400, { error: "Please enter an edit prompt." });
@@ -236,53 +350,70 @@ async function handleEdit(req, res) {
     return;
   }
 
-  const form = new FormData();
-  for (const [key, value] of Object.entries(payload)) {
-    form.append(key, String(value));
-  }
-  form.append("image", new Blob([sourceImage.buffer], { type: sourceImage.contentType }), sourceImage.filename || "image.png");
+  const results = [];
+  let created;
 
-  const mask = parsed.files.mask;
-  if (mask?.buffer?.length) {
-    form.append("mask", new Blob([mask.buffer], { type: mask.contentType }), mask.filename || "mask.png");
-  }
+  for (let index = 0; index < count; index += 1) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(payload)) {
+      form.append(key, String(value));
+    }
+    form.append("image", new Blob([sourceImage.buffer], { type: sourceImage.contentType }), sourceImage.filename || "image.png");
 
-  const response = await fetch(`${apiBase}/images/edits`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.IMAGE_API_KEY}`
-    },
-    body: form
-  });
+    const mask = parsed.files.mask;
+    if (mask?.buffer?.length) {
+      form.append("mask", new Blob([mask.buffer], { type: mask.contentType }), mask.filename || "mask.png");
+    }
 
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    sendJson(res, response.status, {
-      error: data?.error?.message || data?.message || "Image edit failed."
+    const response = await fetch(`${apiBase}/images/edits`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.IMAGE_API_KEY}`
+      },
+      body: form
     });
-    return;
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      sendJson(res, response.status, {
+        error: data?.error?.message || data?.message || "Image edit failed."
+      });
+      return;
+    }
+
+    const normalized = normalizeImageResponse(data);
+    if (normalized) {
+      results.push(...normalized.images);
+      created = normalized.created || created;
+    }
   }
 
-  const normalized = normalizeImageResponse(data);
-  if (!normalized) {
+  if (!results.length) {
     sendJson(res, 502, { error: "The image API returned an empty edit result." });
     return;
   }
 
-  sendJson(res, 200, normalized);
+  sendJson(res, 200, {
+    image: results[0],
+    images: results,
+    created,
+    model: payload.model
+  });
 }
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
-  const safePath = normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, "");
-  const filePath = join(publicDir, safePath);
+  const assetPath = vendorFiles[requestedPath];
+  const filePath = assetPath || join(publicDir, normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, ""));
 
   if (!filePath.startsWith(publicDir)) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
+    if (!assetPath) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
   }
 
   try {
@@ -295,29 +426,61 @@ async function serveStatic(req, res) {
   }
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
+export function startServer(port = defaultPort) {
+  return new Promise((resolve, reject) => {
+    let server;
+
+    const handleRequest = async (req, res) => {
+      try {
     if (req.method === "POST" && req.url === "/api/generate") {
       await handleGenerate(req, res);
       return;
     }
 
-    if (req.method === "POST" && req.url === "/api/edit") {
-      await handleEdit(req, res);
+    if (req.method === "POST" && req.url === "/api/generate-stream") {
+      await handleGenerateStream(req, res);
       return;
     }
 
-    if (req.method === "GET") {
-      await serveStatic(req, res);
-      return;
-    }
+        if (req.method === "POST" && req.url === "/api/edit") {
+          await handleEdit(req, res);
+          return;
+        }
 
-    sendJson(res, 405, { error: "Method not allowed." });
-  } catch (error) {
-    sendJson(res, 500, { error: error instanceof Error ? error.message : "Unexpected server error." });
-  }
-});
+        if (req.method === "GET") {
+          await serveStatic(req, res);
+          return;
+        }
 
-server.listen(port, () => {
-  console.log(`DreamTools image web running at http://localhost:${port}`);
-});
+        sendJson(res, 405, { error: "Method not allowed." });
+      } catch (error) {
+        sendJson(res, 500, { error: error instanceof Error ? error.message : "Unexpected server error." });
+      }
+    };
+
+    const listen = (targetPort) => {
+      server = http.createServer(handleRequest);
+
+      server.once("error", (error) => {
+        if (error?.code === "EADDRINUSE" && targetPort !== 0) {
+          listen(0);
+          return;
+        }
+        reject(error);
+      });
+
+      server.listen(targetPort, () => {
+        const address = server.address();
+        const actualPort = typeof address === "object" && address ? address.port : targetPort;
+        console.log(`DreamTools image web running at http://localhost:${actualPort}`);
+        resolve({ server, port: actualPort });
+      });
+    };
+
+    listen(port);
+  });
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  await startServer();
+}

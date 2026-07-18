@@ -3,10 +3,46 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
-    "start": "node server.js"
+    "postinstall": "node scripts/sync-vendor.mjs",
+    "start": "node server.js",
+    "dev": "electron .",
+    "dist:mac": "electron-builder --mac"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "antd": "^5.21.6",
+    "dayjs": "^1.11.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.dreamtools.imageweb",
+    "productName": "DreamTools",
+    "files": [
+      "electron/**",
+      "public/**",
+      "server.js",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "notarize": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   }
 }
