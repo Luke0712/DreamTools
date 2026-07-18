@@ -73,11 +73,11 @@ body {
 }
 
 .upload-grid {
-  margin-bottom: -10px;
+  margin-bottom: 8px;
 }
 
 .upload-grid + .ant-form-item {
-  margin-top: 0;
+  margin-top: 8px;
 }
 
 .compact-form-item {
@@ -90,13 +90,12 @@ body {
 }
 
 .upload-grid .ant-form-item-control-input-content {
-  position: relative;
-  height: 82px;
-  overflow: hidden;
+  min-height: 58px;
+  overflow: visible;
 }
 
 .upload-grid .ant-upload-drag {
-  height: 82px;
+  height: 58px;
   background: #f8fafb;
 }
 
@@ -107,41 +106,6 @@ body {
   place-items: center;
 }
 
-.upload-grid .ant-upload-list {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  min-height: 34px;
-  max-height: 34px;
-  overflow: hidden;
-  pointer-events: auto;
-}
-
-.upload-grid .ant-upload-list-item {
-  height: 34px !important;
-  margin-top: 0 !important;
-  border-radius: 8px !important;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 4px 12px rgb(20 32 45 / 10%);
-}
-
-.upload-grid .ant-upload-list-item-name {
-  max-width: 78px;
-  font-size: 12px;
-}
-
-.upload-grid .ant-upload-list-item-thumbnail {
-  width: 24px !important;
-  height: 24px !important;
-  line-height: 24px !important;
-}
-
-.upload-grid .ant-upload-list-item-thumbnail img {
-  object-fit: contain;
-}
-
 .upload-title {
   margin: 0;
   color: #172026;
@@ -149,8 +113,50 @@ body {
   font-weight: 800;
 }
 
-.upload-grid .ant-upload-wrapper:has(.ant-upload-list-item) .upload-title {
-  display: none;
+.upload-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.upload-preview-image {
+  width: 100%;
+  height: 100%;
+  max-height: 50px;
+  object-fit: contain;
+  display: block;
+  border-radius: 6px;
+}
+
+.upload-remove {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(23 32 38 / 84%);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 17px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+.upload-preview:hover .upload-remove,
+.upload-preview:focus-within .upload-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.upload-remove:hover {
+  background: rgb(23 32 38 / 92%);
 }
 
 .advanced-panel {
@@ -167,7 +173,11 @@ body {
 }
 
 .param-grid .ant-form-item {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+}
+
+.param-grid .ant-form-item-label {
+  padding-bottom: 2px;
 }
 
 .form-divider {
@@ -227,19 +237,25 @@ body {
 }
 
 .image-preview-button {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   border: 0;
   background: transparent;
   cursor: zoom-in;
   display: grid;
   place-items: center;
+  overflow: hidden;
 }
 
 .result-image {
-  max-width: 100%;
-  max-height: 100%;
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100% - 2px);
+  max-height: calc(100% - 2px);
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 16px 44px rgb(20 32 45 / 22%);
@@ -280,7 +296,7 @@ body {
   padding: 8px;
   border: 1px solid #e4e8ec;
   border-radius: 8px;
-  background: #ffffff;
+  background: #f8fafb;
 }
 
 .thumb {
@@ -288,24 +304,27 @@ body {
   flex: 0 0 76px;
   width: 76px;
   height: 76px;
-  padding: 0;
+  padding: 3px;
   border: 2px solid transparent;
   border-radius: 8px;
   overflow: hidden;
-  background: #f8fafb;
+  background: #ffffff;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(20 32 45 / 10%);
 }
 
 .thumb.active {
   border-color: #126b57;
+  box-shadow: 0 6px 16px rgb(18 107 87 / 20%);
 }
 
 .thumb img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  border-radius: 5px;
   display: block;
-  background: #ffffff;
+  background: #eef2f5;
 }
 
 .thumb span {

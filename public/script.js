@@ -31,6 +31,9 @@ const { TextArea } = Input;
 const { Dragger } = Upload;
 
 const selectOptions = {
+  model: [
+    { label: "gpt-image-2", value: "gpt-image-2" }
+  ],
   size: [
     { label: "auto", value: "auto" },
     { label: "1024 x 1024", value: "1024x1024" },
@@ -112,6 +115,8 @@ function ImageWorkbench() {
   const [images, setImages] = useState([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [sourcePreview, setSourcePreview] = useState("");
+  const [maskPreview, setMaskPreview] = useState("");
   const [status, setStatus] = useState("输入提示词后开始。");
   const selectedImage = images[selectedIndex] || images[0];
 
@@ -254,6 +259,38 @@ function ImageWorkbench() {
     return false;
   }
 
+  function updateUploadPreview(info, setter) {
+    const file = info?.fileList?.[0]?.originFileObj;
+    if (!file) {
+      setter("");
+      return;
+    }
+    setter(URL.createObjectURL(file));
+  }
+
+  function clearUpload(fieldName, setter) {
+    form.setFieldValue(fieldName, undefined);
+    setter("");
+  }
+
+  function uploadContent(label, preview, onClear) {
+    return preview
+      ? React.createElement("div", { className: "upload-preview" },
+          React.createElement("img", { className: "upload-preview-image", src: preview, alt: label }),
+          React.createElement("button", {
+            className: "upload-remove",
+            type: "button",
+            onClick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClear();
+            },
+            "aria-label": `删除${label.replace("添加", "")}`
+          }, "×")
+        )
+      : React.createElement("p", { className: "upload-title" }, label);
+  }
+
   return (
     React.createElement(ConfigProvider, {
       theme: {
@@ -295,10 +332,13 @@ function ImageWorkbench() {
                           accept: "image/png,image/jpeg,image/webp",
                           beforeUpload,
                           maxCount: 1,
+                          showUploadList: false,
                           listType: "picture",
-                          multiple: false
+                          multiple: false,
+                          onChange: (info) => updateUploadPreview(info, setSourcePreview),
+                          onRemove: () => setSourcePreview("")
                         },
-                          React.createElement("p", { className: "upload-title" }, "添加原图"),
+                          uploadContent("添加原图", sourcePreview, () => clearUpload("image", setSourcePreview)),
                         )
                       ),
                       React.createElement(Form.Item, { label: "蒙版", name: "mask", valuePropName: "file", className: "compact-form-item" },
@@ -306,10 +346,13 @@ function ImageWorkbench() {
                           accept: "image/png,image/jpeg,image/webp",
                           beforeUpload,
                           maxCount: 1,
+                          showUploadList: false,
                           listType: "picture",
-                          multiple: false
+                          multiple: false,
+                          onChange: (info) => updateUploadPreview(info, setMaskPreview),
+                          onRemove: () => setMaskPreview("")
                         },
-                          React.createElement("p", { className: "upload-title" }, "添加蒙版")
+                          uploadContent("添加蒙版", maskPreview, () => clearUpload("mask", setMaskPreview))
                         )
                       )
                     ),
@@ -332,7 +375,7 @@ function ImageWorkbench() {
                       key: "params",
                       label: "高级参数",
                       children: React.createElement("div", { className: "param-grid" },
-                        React.createElement(Form.Item, { label: "模型", name: "model" }, React.createElement(Input, null)),
+                        React.createElement(Form.Item, { label: "模型", name: "model" }, React.createElement(Select, { options: selectOptions.model })),
                         React.createElement(Form.Item, { label: "尺寸", name: "size" }, React.createElement(Select, { options: selectOptions.size })),
                         React.createElement(Form.Item, { label: "数量", name: "n" }, React.createElement(InputNumber, { min: 1, max: 10, className: "full-width" })),
                         React.createElement(Form.Item, { label: "质量", name: "quality" }, React.createElement(Select, { options: selectOptions.quality })),
