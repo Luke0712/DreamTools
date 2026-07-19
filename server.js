@@ -56,7 +56,10 @@ function getRuntimeConfig() {
   return {
     apiKey: process.env.IMAGE_API_KEY || "",
     apiBase: process.env.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1",
-    model: process.env.IMAGE_MODEL || "gpt-image-2"
+    model: process.env.IMAGE_MODEL || "gpt-image-2",
+    speechApiKey: process.env.SPEECH_API_KEY || "DeAGtwOW5xKQphLhLpmAbRxNylj9HLRYF6PnIZT8U7J8w71E",
+    speechApiUrl: process.env.SPEECH_API_URL || "https://apiproxy.paigod.work/v3/minimax-speech-2.8-turbo",
+    speechModel: process.env.SPEECH_MODEL || "speech-2.8-turbo"
   };
 }
 
@@ -69,6 +72,9 @@ async function loadPersistedConfig() {
     if (data.IMAGE_API_KEY && !process.env.IMAGE_API_KEY) process.env.IMAGE_API_KEY = String(data.IMAGE_API_KEY);
     if (data.IMAGE_API_BASE && !process.env.IMAGE_API_BASE) process.env.IMAGE_API_BASE = String(data.IMAGE_API_BASE);
     if (data.IMAGE_MODEL && !process.env.IMAGE_MODEL) process.env.IMAGE_MODEL = String(data.IMAGE_MODEL);
+    if (data.SPEECH_API_KEY && !process.env.SPEECH_API_KEY) process.env.SPEECH_API_KEY = String(data.SPEECH_API_KEY);
+    if (data.SPEECH_API_URL && !process.env.SPEECH_API_URL) process.env.SPEECH_API_URL = String(data.SPEECH_API_URL);
+    if (data.SPEECH_MODEL && !process.env.SPEECH_MODEL) process.env.SPEECH_MODEL = String(data.SPEECH_MODEL);
   } catch {
     // ignore missing or malformed config
   }
@@ -80,12 +86,18 @@ async function savePersistedConfig(body) {
   const next = {
     IMAGE_API_KEY: String(body.IMAGE_API_KEY || ""),
     IMAGE_API_BASE: String(body.IMAGE_API_BASE || "https://apiproxy.paigod.work/v1"),
-    IMAGE_MODEL: String(body.IMAGE_MODEL || "gpt-image-2")
+    IMAGE_MODEL: String(body.IMAGE_MODEL || "gpt-image-2"),
+    SPEECH_API_KEY: String(body.SPEECH_API_KEY || ""),
+    SPEECH_API_URL: String(body.SPEECH_API_URL || "https://apiproxy.paigod.work/v3/minimax-speech-2.8-turbo"),
+    SPEECH_MODEL: String(body.SPEECH_MODEL || "speech-2.8-turbo")
   };
 
   process.env.IMAGE_API_KEY = next.IMAGE_API_KEY;
   process.env.IMAGE_API_BASE = next.IMAGE_API_BASE;
   process.env.IMAGE_MODEL = next.IMAGE_MODEL;
+  process.env.SPEECH_API_KEY = next.SPEECH_API_KEY;
+  process.env.SPEECH_API_URL = next.SPEECH_API_URL;
+  process.env.SPEECH_MODEL = next.SPEECH_MODEL;
 
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
@@ -111,6 +123,14 @@ async function readRequestBody(req) {
 function assertApiKey(res) {
   if (!getRuntimeConfig().apiKey) {
     sendJson(res, 400, { error: "请先在应用设置里填写 API Key。", code: "MISSING_IMAGE_API_KEY" });
+    return false;
+  }
+  return true;
+}
+
+function assertSpeechApiKey(res) {
+  if (!getRuntimeConfig().speechApiKey) {
+    sendJson(res, 400, { error: "请先在应用设置里填写语音 API Key。", code: "MISSING_SPEECH_API_KEY" });
     return false;
   }
   return true;
@@ -144,6 +164,86 @@ function buildImagePayload(body) {
 
   payload.model = String(body.model || getRuntimeConfig().model);
   return payload;
+}
+
+function buildSpeechPayload(body) {
+  const runtime = getRuntimeConfig();
+  const text = String(body?.text || "").trim();
+  const sampleRate = Number(body?.sampleRate || 32000);
+  const bitrate = Number(body?.bitrate || 128000);
+  const channel = Number(body?.channel || 1);
+  const speed = Number(body?.speed || 1);
+  const volume = Number(body?.volume || 1);
+  const pitch = Number(body?.pitch || 0);
+  const voiceModifyPitch = Number(body?.voiceModifyPitch);
+  const voiceModifyTimbre = Number(body?.voiceModifyTimbre);
+  const voiceModifyIntensity = Number(body?.voiceModifyIntensity);
+  const pronunciationTone = String(body?.pronunciationTone || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const payload = {
+    model: String(body?.model || runtime.speechModel),
+    text,
+    stream: false,
+    language_boost: String(body?.languageBoost || "Chinese"),
+    output_format: "hex",
+    aigc_watermark: Boolean(body?.aigcWatermark),
+    voice_setting: {
+      voice_id: String(body?.customVoiceId || body?.voiceId || "Chinese (Mandarin)_Lyrical_Voice"),
+      speed: Number.isFinite(speed) ? speed : 1,
+      vol: Number.isFinite(volume) ? volume : 1,
+      pitch: Number.isFinite(pitch) ? pitch : 0
+    },
+    audio_setting: {
+      sample_rate: Number.isFinite(sampleRate) ? sampleRate : 32000,
+      audio_sample_rate: Number.isFinite(sampleRate) ? sampleRate : 32000,
+      bitrate: Number.isFinite(bitrate) ? bitrate : 128000,
+      format: String(body?.format || "mp3"),
+      channel: Number.isFinite(channel) ? channel : 1
+    }
+  };
+
+  if (body?.emotion) payload.voice_setting.emotion = String(body.emotion);
+  if (body?.englishNormalization !== undefined) {
+    payload.voice_setting.english_normalization = Boolean(body.englishNormalization);
+  }
+  if (body?.soundEffects || Number.isFinite(voiceModifyPitch) || Number.isFinite(voiceModifyTimbre) || Number.isFinite(voiceModifyIntensity)) {
+    payload.voice_modify = {};
+    if (Number.isFinite(voiceModifyPitch)) payload.voice_modify.pitch = voiceModifyPitch;
+    if (Number.isFinite(voiceModifyTimbre)) payload.voice_modify.timbre = voiceModifyTimbre;
+    if (Number.isFinite(voiceModifyIntensity)) payload.voice_modify.intensity = voiceModifyIntensity;
+    if (body.soundEffects) payload.voice_modify.sound_effects = String(body.soundEffects);
+  }
+  if (pronunciationTone.length) {
+    payload.pronunciation_dict = { tone: pronunciationTone };
+  }
+
+  return payload;
+}
+
+function getAudioMime(format) {
+  const map = {
+    flac: "audio/flac",
+    opus: "audio/ogg",
+    pcm: "audio/L16",
+    pcmu_raw: "audio/basic",
+    pcmu_wav: "audio/wav",
+    wav: "audio/wav"
+  };
+  return map[format] || "audio/mpeg";
+}
+
+function normalizeSpeechResponse(data, format = "mp3") {
+  const audioHex = data?.data?.audio || data?.audio;
+  if (!audioHex || typeof audioHex !== "string") return null;
+
+  return {
+    audio: `data:${getAudioMime(format)};base64,${Buffer.from(audioHex, "hex").toString("base64")}`,
+    duration: data?.extra_info?.audio_length,
+    traceId: data?.trace_id
+  };
 }
 
 function normalizeImageResponse(data) {
@@ -290,6 +390,61 @@ async function handleGenerate(req, res) {
     images: results,
     created,
     model: payload.model
+  });
+}
+
+async function handleSpeech(req, res) {
+  if (!assertSpeechApiKey(res)) return;
+
+  const body = await parseJsonRequest(req);
+  if (!body) {
+    sendJson(res, 400, { error: "Invalid JSON request." });
+    return;
+  }
+
+  const payload = buildSpeechPayload(body);
+  if (payload.text.length < 1) {
+    sendJson(res, 400, { error: "请输入要合成的文本。" });
+    return;
+  }
+
+  const runtime = getRuntimeConfig();
+  const response = await fetch(runtime.speechApiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${runtime.speechApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    sendJson(res, response.status, {
+      error: data?.base_resp?.status_msg || data?.error?.message || data?.message || "Speech generation failed."
+    });
+    return;
+  }
+
+  if (data?.base_resp?.status_code && data.base_resp.status_code !== 0) {
+    sendJson(res, 502, {
+      error: data.base_resp.status_msg || "Speech generation failed.",
+      code: data.base_resp.status_code
+    });
+    return;
+  }
+
+  const normalized = normalizeSpeechResponse(data, payload.audio_setting.format);
+  if (!normalized) {
+    sendJson(res, 502, { error: "The speech API returned an empty audio result." });
+    return;
+  }
+
+  sendJson(res, 200, {
+    ...normalized,
+    model: payload.model,
+    voiceId: payload.voice_setting.voice_id,
+    format: payload.audio_setting.format
   });
 }
 
@@ -569,7 +724,10 @@ function readSettings() {
   return {
     hasApiKey: Boolean(runtime.apiKey),
     apiBase: runtime.apiBase,
-    model: runtime.model
+    model: runtime.model,
+    hasSpeechApiKey: Boolean(runtime.speechApiKey),
+    speechApiUrl: runtime.speechApiUrl,
+    speechModel: runtime.speechModel
   };
 }
 
@@ -598,6 +756,11 @@ export function startServer(port = defaultPort) {
 
         if (req.method === "POST" && req.url === "/api/generate") {
           await handleGenerate(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/api/speech") {
+          await handleSpeech(req, res);
           return;
         }
 
